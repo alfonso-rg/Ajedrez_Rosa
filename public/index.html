@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Ajedrez Multijugador</title>
+    <link rel="stylesheet"
+      href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"
+      integrity="sha384-q94+BZtLrkL1/ohfjR8c6L+A6qzNH9R2hBLwyoAfu3i/WCvQjzL2RQJ3uNHDISdU"
+      crossorigin="anonymous">
+    
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #333; color: white; }
+        #board { width: 400px; margin: 20px; }
+        #status { margin-top: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>Ajedrez Online</h1>
+    <div id="status">Esperando oponente...</div>
+    <div id="board"></div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        const socket = io();
+        const game = new Chess();
+        let board = null;
+        let playerColor = null;
+
+        const $status = $('#status');
+
+        function onDragStart (source, piece, position, orientation) {
+            // No permitir mover si el juego terminó
+            if (game.game_over()) return false;
+
+            // Solo permitir mover tus propias piezas
+            if ((playerColor === 'white' && piece.search(/^b/) !== -1) ||
+                (playerColor === 'black' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+            
+            // No permitir mover si no es tu turno
+            if ((game.turn() === 'w' && playerColor !== 'white') ||
+                (game.turn() === 'b' && playerColor !== 'black')) {
+                return false;
+            }
+        }
+
+        function onDrop (source, target) {
+            // Intentar mover en la lógica interna (chess.js)
+            const move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Siempre promueve a reina por simplicidad
+            });
+
+            // Si el movimiento es ilegal, devolver la pieza a su lugar
+            if (move === null) return 'snapback';
+
+            // Enviar movimiento al servidor
+            socket.emit('move', move);
+            updateStatus();
+        }
+
+        // Ajustar posición si hubo enroque, etc.
+        function onSnapEnd () {
+            board.position(game.fen());
+        }
+
+        function updateStatus () {
+            let status = '';
+            let moveColor = (game.turn() === 'b') ? 'Negras' : 'Blancas';
+
+            if (game.in_checkmate()) {
+                status = 'Juego terminado, ' + moveColor + ' están en jaque mate.';
+            } else if (game.in_draw()) {
+                status = 'Juego terminado, tablas.';
+            } else {
+                status = 'Turno de: ' + moveColor;
+                if (game.in_check()) {
+                    status += ', ' + moveColor + ' están en jaque';
+                }
+            }
+            $status.html(status + ' | Tú eres: ' + (playerColor === 'white' ? 'Blancas' : 'Negras'));
+        }
+
+        const config = {
+            draggable: true,
+            position: 'start',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd
+        };
+        
+        board = Chessboard('board', config);
+
+        // --- Eventos de Socket.io ---
+
+        // Recibir color asignado
+        socket.on('playerColor', (color) => {
+            playerColor = color;
+            board.orientation(color); // Girar tablero si eres negras
+            updateStatus();
+        });
+
+        // Recibir movimiento del oponente
+        socket.on('move', (move) => {
+            game.move(move);
+            board.position(game.fen());
+            updateStatus();
+        });
+
+        socket.on('spectator', () => {
+            alert("La sala está llena, estás en modo espectador.");
+        });
+
+    </script>
+</body>
+</html>
